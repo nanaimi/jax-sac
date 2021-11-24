@@ -3,7 +3,6 @@ from copy import deepcopy
 import gym
 import numpy as np
 import tensorflow as tf
-from portfolio_environment.make import create_portfolio_environment
 from tensorflow import keras as tfk
 
 import sac.env_wrappers as env_wrappers

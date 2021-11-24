@@ -1,19 +1,22 @@
 from copy import deepcopy
 
-import tensorflow as tf
-from tensorflow_probability import bijectors as tfb
-from tensorflow_probability import distributions as tfd
+import jax.numpy as jnp
+import jax.nn as jnn
+from tensorflow_probability.substrates import jax as tfp
+import haiku as hk
 
 import sac.utils as utils
 
+tfd = tfp.distributions
+tfb = tfp.bijectors
 
-class Actor(tf.Module):
+
+class Actor(hk.Module):
     def __init__(self, net, optimizer, size, min_stddev, clip_grad,
                  observation_encoder=None):
         super().__init__()
-        assert isinstance(net, tf.keras.Sequential)
-        self._net = net
-        self._net.add(tf.keras.layers.Dense(2 * size))
+        assert isinstance(net, hk.nets.MLP)
+        self._net = hk.Sequential([net, hk.Linear(2 * size)])
         self._optimizer = optimizer
         self._min_stddev = min_stddev
         self._clip_grad = clip_grad
@@ -21,8 +24,8 @@ class Actor(tf.Module):
 
     def __call__(self, observation):
         x = self._encoder(observation)
-        mu, stddev = tf.split(self._net(x), 2, -1)
-        stddev = tf.math.softplus(stddev) + self._min_stddev
+        mu, stddev = jnp.split(self._net(x), 2, -1)
+        stddev = jnn.softplus(stddev) + self._min_stddev
         multivariate_normal_diag = tfd.MultivariateNormalDiag(loc=mu, scale_diag=stddev)
         # Squash actions to [-1, 1]
         squashed = tfd.TransformedDistribution(multivariate_normal_diag, StableTanhBijector())
@@ -35,13 +38,12 @@ class Actor(tf.Module):
         return global_norm
 
 
-class Critic(tf.Module):
+class Critic(hk.Module):
     def __init__(self, net, optimizer, discount, tau, clip_grad,
                  observation_encoder=None):
         super().__init__()
-        assert isinstance(net, tf.keras.Sequential)
-        self._q_value = net
-        self._q_value.add(tf.keras.layers.Dense(1))
+        assert isinstance(net, hk.nets.MLP)
+        self._q_value = hk.Sequential([net, hk.Linear(1)])
         self._delayed_q_value = deepcopy(self._q_value)
         self._optimizer = optimizer
         self._discount = discount
@@ -51,9 +53,9 @@ class Critic(tf.Module):
 
     def __call__(self, observation, action, mode='delayed'):
         x = self._encoder(observation)
-        x = tf.concat([x, action], -1)
+        x = jnp.concatenate([x, action], -1)
         mu = self._q_value(x) if mode != 'delayed' else self._delayed_q_value(x)
-        mu = tf.squeeze(mu, -1)
+        mu = jnp.squeeze(mu, -1)
         return tfd.Normal(loc=mu, scale=1.0)
 
     def update(self, observation, action, td_target):
@@ -69,24 +71,6 @@ class Critic(tf.Module):
         # Clone only after initialization.
         if self._delayed_q_value.inputs is not None:
             utils.clone_model(self._q_value, self._delayed_q_value, self._tau)
-
-
-class PortfolioObservationEncoder(tf.Module):
-    def __init__(self, gru_units, units):
-        super().__init__()
-        self.recurrent = tf.keras.layers.GRU(gru_units, return_sequences=True, return_state=True)
-        self.w1 = tf.keras.layers.Dense(units)
-        self.w2 = tf.keras.layers.Dense(units)
-        self.v = tf.keras.layers.Dense(1)
-
-    def __call__(self, observation):
-        state, prev_weights = observation
-        outputs, final_state = self.recurrent(state)
-        final_state = final_state[:, None]
-        score = tf.nn.tanh(self.w1(outputs) + self.w2(final_state))
-        attention = tf.nn.softmax(self.v(score), axis=1)
-        context = tf.reduce_sum(attention * outputs, axis=1)
-        return tf.concat([context, prev_weights], -1)
 
 
 # Following https://github.com/tensorflow/probability/issues/840 and
@@ -120,14 +104,14 @@ class SampleDist(object):
 
     def mean(self):
         samples = self._dist.sample(self._samples, seed=self._seed)
-        return tf.reduce_mean(samples, 0)
+        return jnp.mean(samples, 0)
 
     def mode(self):
         sample = self._dist.sample(self._samples, seed=self._seed)
         logprob = self._dist.log_prob(sample)
-        return tf.gather(sample, tf.argmax(logprob))[0]
+        return tf.gather(sample, jnp.argmax(logprob))[0]
 
     def entropy(self):
         sample = self._dist.sample(self._samples, seed=self._seed)
         logprob = self.log_prob(sample)
-        return -tf.reduce_mean(logprob, 0)
+        return -jnp.mean(logprob, 0)

@@ -1,18 +1,20 @@
+import jax.numpy as jnp
 import numpy as np
-import tensorflow as tf
+import haiku as hk
 
 import sac.utils as utils
 
 
-class SAC(tf.Module):
-    def __init__(self, actor, critics, experience, logger, action_space, config):
+class SAC(hk.Module):
+    def __init__(self, actor, critics, experience,
+                 logger, action_space, config):
         super(SAC, self).__init__()
         self.actor = actor
         self.critics = critics
         self.experience = experience
         self.logger = logger
         self.config = config
-        self._training_step = tf.Variable(0, trainable=False, dtype=tf.int32)
+        self.training_step = 0
         self._log_alpha = tf.Variable(0.0)
         self._alpha_optimizer = tf.optimizers.Adam(config.alpha_lr)
         self._target_entropy = -np.prod(action_space.shape)
@@ -49,7 +51,7 @@ class SAC(tf.Module):
         return action
 
     def observe(self, transition):
-        self._training_step.assign_add(1)
+        self.training_step.assign_add(1)
         self.experience.store(**transition)
 
     @tf.function
@@ -108,10 +110,6 @@ class SAC(tf.Module):
         self._alpha_optimizer.apply_gradients(zip(grads, [self._log_alpha]))
         return {'agent/alpha/loss': alpha_loss,
                 'agent/alpha/grads': grads}
-
-    @property
-    def training_step(self):
-        return self._training_step.value().numpy()
 
     @property
     def time_to_update(self):
