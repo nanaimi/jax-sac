@@ -45,6 +45,7 @@ class TestModelAndOptimizer(unittest.TestCase):
         train = load_dataset("train", is_training=True, batch_size=1000)
         train_eval = load_dataset("train", is_training=False, batch_size=10000)
         test_eval = load_dataset("test", is_training=False, batch_size=10000)
+        best_accuracy = 0.0
         for step in range(10001):
             if step % 1000 == 0:
                 train_accuracy = accuracy(model, next(train_eval))
@@ -52,4 +53,6 @@ class TestModelAndOptimizer(unittest.TestCase):
                 train_accuracy, test_accuracy = jax.device_get((train_accuracy, test_accuracy))
                 print(f"[Step {step}] Train / Test accuracy: "
                       f"{train_accuracy:.3f} / {test_accuracy:.3f}.")
+                best_accuracy = max(best_accuracy, test_accuracy)
             model.update(lambda: loss_fn(model, next(train)))
+        self.assertLess(best_accuracy, 0.6)
