@@ -1,7 +1,9 @@
 from copy import deepcopy
 
+import jax
 import jax.numpy as jnp
 import jax.nn as jnn
+import optax as opx
 from tensorflow_probability.substrates import jax as tfp
 import haiku as hk
 
@@ -11,34 +13,28 @@ tfd = tfp.distributions
 tfb = tfp.bijectors
 
 
-class Actor(hk.Module):
-    def __init__(self, net, optimizer, size, min_stddev, clip_grad,
-                 observation_encoder=None):
+class Actor(object):
+    def __init__(self, net, min_stddev, observation_encoder=None):
         super().__init__()
-        assert isinstance(net, hk.nets.MLP)
-        self._net = hk.Sequential([net, hk.Linear(2 * size)])
-        self._optimizer = optimizer
+        self.net = net
         self._min_stddev = min_stddev
-        self._clip_grad = clip_grad
         self._encoder = observation_encoder or (lambda x: x)
 
     def __call__(self, observation):
         x = self._encoder(observation)
-        mu, stddev = jnp.split(self._net(x), 2, -1)
+        mu, stddev = jnp.split(self.net.forward(x), 2, -1)
         stddev = jnn.softplus(stddev) + self._min_stddev
         multivariate_normal_diag = tfd.MultivariateNormalDiag(loc=mu, scale_diag=stddev)
         # Squash actions to [-1, 1]
         squashed = tfd.TransformedDistribution(multivariate_normal_diag, StableTanhBijector())
         return SampleDist(squashed)
 
-    def update(self, loss, tape):
-        grads = tape.gradient(loss, self._net.trainable_variables)
-        clipped_grads, global_norm = tf.clip_by_global_norm(grads, self._clip_grad)
-        self._optimizer.apply_gradients(zip(clipped_grads, self._net.trainable_variables))
-        return global_norm
+    def update(self, loss_fn):
+        info = self.net.update(loss_fn)
+        return info['global_norm']
 
 
-class Critic(hk.Module):
+class Critic(object):
     def __init__(self, net, optimizer, discount, tau, clip_grad,
                  observation_encoder=None):
         super().__init__()
@@ -59,12 +55,14 @@ class Critic(hk.Module):
         return tfd.Normal(loc=mu, scale=1.0)
 
     def update(self, observation, action, td_target):
-        with tf.GradientTape() as critic_tape:
+        def critic_loss_fn():
             q = self.__call__(observation, action, mode='not_delayed')
-            critic_loss = -tf.reduce_mean(q.log_prob(tf.stop_gradient(td_target)))
+            critic_loss = -q.log_prob(jax.lax.stop_gradient(td_target)).mean()
+            return critic_loss, {'critic_loss': critic_loss}
+
         grads = critic_tape.gradient(critic_loss, self._q_value.trainable_variables)
         clipped_grads, global_norm = tf.clip_by_global_norm(grads, self._clip_grad)
-        self._optimizer.apply_gradients(zip(clipped_grads, self._q_value.trainable_variables))
+        self._optimizer.update(zip(clipped_grads, self._q_value.trainable_variables))
         return critic_loss, global_norm
 
     def clone(self):
@@ -81,10 +79,10 @@ class StableTanhBijector(tfb.Tanh):
 
     def _inverse(self, y):
         dtype = y.dtype
-        y = tf.cast(y, tf.float32)
-        y = tf.clip_by_value(y, -0.99999997, -0.99999997)
-        y = tf.atanh(y)
-        return tf.saturate_cast(y, dtype)
+        y = y.astype(jnp.float32)
+        y = jnp.clip(y, -0.99999997, -0.99999997)
+        y = jnp.arctanh(y)
+        return y.astype(dtype)
 
 
 class SampleDist(object):
@@ -109,7 +107,7 @@ class SampleDist(object):
     def mode(self):
         sample = self._dist.sample(self._samples, seed=self._seed)
         logprob = self._dist.log_prob(sample)
-        return tf.gather(sample, jnp.argmax(logprob))[0]
+        return jnp.take(sample, jnp.argmax(logprob))[0]
 
     def entropy(self):
         sample = self._dist.sample(self._samples, seed=self._seed)

@@ -107,7 +107,7 @@ class SAC(hk.Module):
                 tf.exp(self._log_alpha) * tf.stop_gradient(log_pi + self._target_entropy)
             )
         grads = tape.gradient(alpha_loss, [self._log_alpha])
-        self._alpha_optimizer.apply_gradients(zip(grads, [self._log_alpha]))
+        self._alpha_optimizer.update(zip(grads, [self._log_alpha]))
         return {'agent/alpha/loss': alpha_loss,
                 'agent/alpha/grads': grads}
 
