@@ -1,5 +1,6 @@
-import jax.numpy as jnp
 import numpy as np
+
+import jax
 import haiku as hk
 
 import sac.utils as utils
@@ -43,7 +44,7 @@ class SAC(hk.Module):
         action = self.policy(standardize(observation), training).numpy()
         return np.clip(action, -1.0, 1.0)
 
-    @tf.function
+    @jax.jit
     def policy(self, observation, training=True):
         policy = self.actor(observation)
         action = policy.sample() if training else policy.mode()
@@ -54,7 +55,7 @@ class SAC(hk.Module):
         self.training_step.assign_add(1)
         self.experience.store(**transition)
 
-    @tf.function
+    @jax.jit
     def update_actor_critic(self, batch):
         report = dict()
         critic_report = self._update_critics(batch)

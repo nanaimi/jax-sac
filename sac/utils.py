@@ -28,6 +28,7 @@ class LearnableModel(object):
             return self._net.apply(self.params, inputs, rng=hk.next_rng_key())
         return _forward
 
+    @jax.jit
     def update(self, loss_fn):
         assert self.params
         grads = jax.grad(loss_fn)(self.params)
