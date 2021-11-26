@@ -29,11 +29,11 @@ def make_agent(config, environment, logger):
                          config.actor['min_std'],
                          config.actor_opt['clip'],
                          encoder)
-    critics = [models.Critic(*make_net_optimizer_from_config(config.critic, config.critic_opt),
-                             config.discount,
-                             config.tau,
-                             config.critic_opt['clip'],
-                             deepcopy(encoder))
+    critics = [models.DoubleCritic(*make_net_optimizer_from_config(config.critic, config.critic_opt),
+                                   config.discount,
+                                   config.tau,
+                                   config.critic_opt['clip'],
+                                   deepcopy(encoder))
                for _ in range(config.critics)]
     experience = ReplayBuffer(config.replay['capacity'], config.seed, config.replay['batch'])
     agent = SAC(actor, critics, experience, logger, environment.action_space, config)

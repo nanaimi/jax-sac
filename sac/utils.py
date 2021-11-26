@@ -3,11 +3,35 @@ from typing import Callable, Tuple, Union, List
 
 import haiku as hk
 import jax
+import jax.numpy as jnp
 import numpy as np
 import optax
 
+PRNGKey = jnp.ndarray
 
-class LearnableModel(object):
+
+class Learner:
+    def __init__(
+            self,
+            model: hk.Module,
+            input_shape: Union[Tuple[int, ...], List[int]],
+            seed: PRNGKey,
+            optimizer_config: dict
+    ):
+        self.optimizer = optax.adam(optimizer_config['lr'])
+        self.model = hk.transform(model)
+        self.params = self.model.init(
+            seed,
+            np.zeros((1, *input_shape), jnp.float32)
+        )
+        self.opt_state = self.optimizer.init(self.params)
+
+    @property
+    def apply(self):
+        return self.model.apply
+
+
+class LearnableModel:
     def __init__(
             self,
             model: Union[Callable, hk.Module],

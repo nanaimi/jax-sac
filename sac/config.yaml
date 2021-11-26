@@ -23,8 +23,8 @@ defaults:
   critic: {layers: 2, units: 256, act: relu}
   actor_opt: {lr: 3e-4, eps: 1e-7, clip: 1e6}
   critic_opt: {lr: 3e-4, eps: 1e-7, clip: 1e6}
+  alpha_opt: {lr: 3e-4}
   discount: 0.99
-  alpha_lr: 3e-4
   slow_target_update: 1
   tau: 5e-3
   reward_scale: 1.0
