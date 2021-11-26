@@ -82,7 +82,7 @@ class SAC(hk.Module):
         for i, critic in enumerate(self.critics):
             loss, grads = critic.update(batch['observation'], batch['action'], soft_q_target)
             report['agent/critic_' + str(i) + '/loss'] = loss
-            report['agent/critic_' + str(i) + '/grads'] = grads
+            report['agent/critic_' + str(i) + '/grad'] = grads
         return report
 
     def _update_actor(self, batch):
@@ -97,7 +97,7 @@ class SAC(hk.Module):
             loss = -tf.reduce_mean(q_values + entropy_bonus)
         grads = self.actor.update(loss, actor_tape)
         return {'agent/actor/loss': loss,
-                'agent/actor/grads': grads}
+                'agent/actor/grad': grads}
 
     def _update_alpha(self, batch):
         policy = self.actor(batch['observation'])
@@ -110,7 +110,7 @@ class SAC(hk.Module):
         grads = tape.gradient(alpha_loss, [self._log_alpha])
         self._alpha_optimizer.update(zip(grads, [self._log_alpha]))
         return {'agent/alpha/loss': alpha_loss,
-                'agent/alpha/grads': grads}
+                'agent/alpha/grad': grads}
 
     @property
     def time_to_update(self):

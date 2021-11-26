@@ -1,11 +1,11 @@
 from copy import deepcopy
+from typing import Callable
 
-import jax
-import jax.numpy as jnp
-import jax.nn as jnn
-import optax as opx
-from tensorflow_probability.substrates import jax as tfp
 import haiku as hk
+import jax
+import jax.nn as jnn
+import jax.numpy as jnp
+from tensorflow_probability.substrates import jax as tfp
 
 import sac.utils as utils
 
@@ -29,7 +29,7 @@ class Actor(object):
         squashed = tfd.TransformedDistribution(multivariate_normal_diag, StableTanhBijector())
         return SampleDist(squashed)
 
-    def update(self, loss_fn):
+    def update(self, loss_fn: Callable, params: hk.Params):
         info = self.net.update(loss_fn)
         return info['global_norm']
 

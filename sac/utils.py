@@ -1,39 +1,51 @@
+from functools import partial
+from typing import Callable, Tuple, Union, List
+
 import haiku as hk
 import jax
+import numpy as np
 import optax
 
 
-class Optimizer(object):
-    def __init__(self, grads_transform):
-        self.grads_transform = grads_transform
-        self._state = None
-
-    def apply_gradients(self, params, grads):
-        self._state = self._state or self.grads_transform.init(params)
-        updates, self._state = self.grads_transform.update(grads, self._state)
-        return optax.apply_updates(params, updates)
-
-
 class LearnableModel(object):
-    def __init__(self, output_sizes, optimizer):
+    def __init__(
+            self,
+            model: Union[Callable, hk.Module],
+            input_shape: Union[Tuple[int, ...], List[int]],
+            optimizer: optax.GradientTransformation
+    ):
         super().__init__()
-        self._net = hk.transform(lambda x: hk.nets.MLP(output_sizes)(x))
-        self.params = None
+        self.model = hk.transform(model)
         self.optimizer = optimizer
+        self.params = self.model.init(jax.random.PRNGKey(42), np.zeros(input_shape))
+        self.opt_state = self.optimizer.init(self.params)
+
+    def __call__(self, x):
+        return self.model.apply(self.params, x=x, rng=jax.random.PRNGKey(42))
 
     @property
-    def forward(self):
-        def _forward(inputs):
-            self.params = self.params or self._net.init(hk.next_rng_key(), inputs)
-            return self._net.apply(self.params, inputs, rng=hk.next_rng_key())
-        return _forward
+    def apply(self):
+        return self.model.apply
 
-    @jax.jit
-    def update(self, loss_fn):
-        assert self.params
-        grads = jax.grad(loss_fn)(self.params)
-        self.params, info = self.optimizer.apply_gradients(self.params, grads)
+    def update(
+            self,
+            loss_fn: Callable,
+            *x
+    ) -> dict:
+        self.params, self.opt_state, info = self._apply_gradients(
+            loss_fn,
+            self.opt_state,
+            self.params,
+            *x
+        )
         return info
+
+    @partial(jax.jit, static_argnums=(0, 1))
+    def _apply_gradients(self, loss, state, params, *x):
+        grad, info = jax.grad(loss, has_aux=True)(params, *x)
+        updates, new_state = self.optimizer.update(grad, state)
+        new_params = optax.apply_updates(params, updates)
+        return new_params, new_state, info
 
 
 def td_error(next_value, reward, terminal, discount):

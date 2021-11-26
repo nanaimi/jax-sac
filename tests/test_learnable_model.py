@@ -1,10 +1,16 @@
-import unittest
+from functools import partial
+from typing import Mapping
 
+import haiku as hk
 import jax
 import jax.numpy as jnp
+import numpy as np
+import optax
 import tensorflow_datasets as tfds
 
-from sac.utils import Optimizer, LearnableModel
+from sac.utils import LearnableModel
+
+Batch = Mapping[str, np.ndarray]
 
 
 def load_dataset(split: str,
@@ -24,35 +30,56 @@ def softmax_cross_entropy(logits, labels):
 
 
 @jax.jit
-def accuracy(model, batch):
-    x = batch['image'].astype(jnp.float32) / 255.
-    predictions = model.forward(x)
+def accuracy(batch):
+    predictions = model(batch['image'])
     return jnp.mean(jnp.argmax(predictions, axis=-1) == batch["label"])
 
 
-def loss_fn(model, batch):
-    images = batch['images']
-    labels = jax.nn.one_hot(batch["label"], 10)
-    x = images.astype(jnp.float32) / 255.
-    logits = model.forward(x)
-    return jnp.mean(softmax_cross_entropy(logits, labels))
+class DummyClassification(object):
+    def __init__(self, input_shape):
+        def forward(x):
+            x = x.astype(jnp.float32) / 255.
+            mlp = hk.Sequential([
+                hk.Flatten(),
+                hk.Linear(300), jax.nn.relu,
+                hk.Linear(100), jax.nn.relu,
+                hk.Linear(10),
+            ])
+            return mlp(x)
+
+        self.model = LearnableModel(
+            forward,
+            input_shape,
+            optax.adam(1e-3)
+        )
+
+    @partial(jax.jit, static_argnums=0)
+    def __call__(self, x):
+        return self.model(x)
+
+    def update(self, batch: Batch):
+        def loss_fn(params, batch):
+            images = batch['image']
+            logits = self.model.apply(params, jax.random.PRNGKey(42), images)
+            labels = batch["label"]
+            loss = jnp.mean(softmax_cross_entropy(logits, labels))
+            return loss, {'loss': loss}
+
+        return self.model.update(loss_fn, batch)
 
 
-class TestModelAndOptimizer(unittest.TestCase):
-
-    def test_it(self):
-        model = LearnableModel((300, 100, 10), Optimizer())
-        train = load_dataset("train", is_training=True, batch_size=1000)
-        train_eval = load_dataset("train", is_training=False, batch_size=10000)
-        test_eval = load_dataset("test", is_training=False, batch_size=10000)
-        best_accuracy = 0.0
-        for step in range(10001):
-            if step % 1000 == 0:
-                train_accuracy = accuracy(model, next(train_eval))
-                test_accuracy = accuracy(model, next(test_eval))
-                train_accuracy, test_accuracy = jax.device_get((train_accuracy, test_accuracy))
-                print(f"[Step {step}] Train / Test accuracy: "
-                      f"{train_accuracy:.3f} / {test_accuracy:.3f}.")
-                best_accuracy = max(best_accuracy, test_accuracy)
-            model.update(lambda: loss_fn(model, next(train)))
-        self.assertLess(best_accuracy, 0.6)
+if __name__ == '__main__':
+    train = load_dataset("train", is_training=True, batch_size=4)
+    train_eval = load_dataset("train", is_training=False, batch_size=4)
+    test_eval = load_dataset("test", is_training=False, batch_size=4)
+    model = DummyClassification(next(train)['image'].shape)
+    best_accuracy = 0.0
+    for step in range(10001):
+        if step % 10 == 0:
+            train_accuracy = accuracy(model, next(train_eval))
+            test_accuracy = accuracy(model, next(test_eval))
+            train_accuracy, test_accuracy = jax.device_get((train_accuracy, test_accuracy))
+            print(f"[Step {step}] Train / Test accuracy: "
+                  f"{train_accuracy:.3f} / {test_accuracy:.3f}.")
+            best_accuracy = max(best_accuracy, test_accuracy)
+        model.update(next(train))
