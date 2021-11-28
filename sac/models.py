@@ -49,13 +49,13 @@ class EntropyBonus(hk.Module):
         super().__init__()
 
     def __call__(self, log_pi):
-        temprature = hk.get_parameter(
-            "temprature",
+        log_temprature = hk.get_parameter(
+            "log_temprature",
             shape=[1, ],
             dtype=jnp.float32,
             init=hk.initializers.Constant(0.0)
         )
-        return -jnp.exp(temprature) * log_pi
+        return -jnp.exp(log_temprature) * log_pi
 
 
 # Following https://github.com/tensorflow/probability/issues/840 and

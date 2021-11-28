@@ -14,10 +14,6 @@ PRNGKey = jnp.ndarray
 Batch = Mapping[str, np.ndarray]
 
 
-def create_optimizer(learning_rate, clip):
-    return optax.adam(learning_rate)
-
-
 class SAC:
     def __init__(
             self,
@@ -31,25 +27,15 @@ class SAC:
     ):
         super(SAC, self).__init__()
         self.rng_seq = hk.PRNGSequence(config.seed)
-        self.actor = utils.Learner(
-            actor,
-            observation_space.shape,
-            next(self.rng_seq),
-            config.actor_opt
-        )
-        self.critics = utils.Learner(
-            critics,
-            observation_space.shape + action_space.shape,
-            next(self.rng_seq),
-            config.critic_opt
-        )
+        self.actor = utils.Learner(actor, observation_space.shape,
+                                   next(self.rng_seq), config.actor_opt)
+        self.critics = utils.Learner(critics,
+                                     observation_space.shape +
+                                     action_space.shape, next(self.rng_seq),
+                                     config.critic_opt)
         self.target_critics = deepcopy(self.critics)
-        self.entropy_bonus = utils.Learner(
-            EntropyBonus(),
-            (1,),
-            next(self.rng_seq),
-            config.alpha_opt
-        )
+        self.entropy_bonus = utils.Learner(EntropyBonus(), (1,),
+                                           next(self.rng_seq), config.alpha_opt)
         self.experience = experience
         self.logger = logger
         self.config = config
@@ -67,7 +53,8 @@ class SAC:
         if self.time_to_log and training:
             self.logger.log_metrics(self.training_step)
         if self.time_to_clone_critics:
-            print("cloning!")
+            self.target_critics.params = utils.clone_model(
+                self.critics.params, self.target_critics.params)
 
         action = self.policy(observation, training).numpy()
         return np.clip(action, -1.0, 1.0)
@@ -84,99 +71,127 @@ class SAC:
         self.experience.store(**transition)
 
     def update_actor_critic(self, batch):
-        report = dict()
-        critic_report = self._update_critics(batch)
-        report.update(critic_report)
-        actor_report = self._update_actor(batch)
-        report.update(actor_report)
-        alpha_report = self._update_alpha(batch)
-        report.update(alpha_report)
-        report.update(
-            {'agent/actor/entropy': self.actor(batch['observation']).entropy()})
+        self.critics.params, self.critics.opt_state, critic_report = \
+            self._update_critics(self.actor.params, self.critics.params,
+                                 self.target_critics.params,
+                                 self.entropy_bonus.params,
+                                 next(self.rng_seq), self.critics.opt_state,
+                                 batch)
+        self.actor.params, self.actor.opt_state, actor_report = \
+            self._update_actor(self.actor.params, self.critics.params,
+                               self.entropy_bonus.params, next(self.rng_seq),
+                               self.actor.opt_state, batch)
+        (
+            self.entropy_bonus.params,
+            self.entropy_bonus.opt_state,
+            entropy_report
+        ) = self._update_alpha(self.actor.params,
+                               self.entropy_bonus.params,
+                               next(self.rng_seq),
+                               self.entropy_bonus.opt_state,
+                               batch)
+        report = {**critic_report, **actor_report, **entropy_report}
         for k, v in report.items():
             self.logger[k].update_state(v)
 
     @jax.jit
     def _update_critics(
             self,
-            params: hk.Params,
+            actor_params: hk.Params,
+            critic_params: hk.Params,
+            target_critic_params: hk.Params,
+            entropy_params: hk.Params,
             rng_key: PRNGKey,
             opt_state: optax.OptState,
             batch: Batch
-    ) -> Tuple[hk.Params, optax.OptState]:
-        def loss():
-            policy = self.actor.apply(self.actor.params,
-                                      batch['next_observation'])
-            # TODO (yarden): how can we use down here that rng_key?
-            next_action = policy.sample()
-            next_qs = self.target_critics.apply(self.target_critics.params,
+    ) -> Tuple[hk.Params, optax.OptState, dict]:
+        def loss(critic_params: hk.Params, target_critic_params: hk.Params,
+                 actor_params: hk.Params, entropy_params: hk.Params,
+                 rng_key: PRNGKey):
+            policy = self.actor.apply(actor_params, batch['next_observation'])
+            next_action = policy.sample(seed=rng_key)
+            next_qs = self.target_critics.apply(target_critic_params,
                                                 batch['next_observation'],
                                                 next_action)
             debiased_q = jnp.minimum(*jax.tree_map(lambda q: q.mean(), next_qs))
             entropy_bonus = self.entropy_bonus.apply(
-                self.entropy_bonus.params, policy.log_prob(next_action)
-            )
+                entropy_params, policy.log_prob(next_action))
             soft_q = debiased_q + entropy_bonus
             soft_q_target = utils.td_error(
                 soft_q, batch['reward'] * self.config.reward_scale,
                 batch['terminal'], self.config.discount)
-            qs = self.critics.apply(params, batch['observation'],
+            qs = self.critics.apply(critic_params, batch['observation'],
                                     batch['action'])
-            critics_loss = jnp.sum(jax.tree_map(
-                lambda q: -jnp.mean(q.log_prob(
-                    jax.lax.stop_gradient(soft_q_target))), qs))
-            return critics_loss
+            critics_loss = jax.tree_map(lambda q: -jnp.mean(q.log_prob(
+                jax.lax.stop_gradient(soft_q_target))), qs)
+            return critics_loss, {'agent/critic/loss': critics_loss}
 
-        grads = jax.grad(loss)(params)
+        grads, report = jax.grad(loss, has_aux=True)(critic_params,
+                                                     target_critic_params,
+                                                     actor_params,
+                                                     entropy_params, rng_key)
         updates, new_opt_state = self.critics.optimizer.update(grads, opt_state)
-        new_params = optax.apply_updates(params, updates)
-        report = {}
-        return new_params, new_opt_state
+        new_params = optax.apply_updates(actor_params, updates)
+        report.update({'agent/critic/grads': grads})
+        return new_params, new_opt_state, report
 
+    @jax.jit
     def _update_actor(
             self,
-            params: hk.Params,
+            actor_params: hk.Params,
+            critic_params: hk.Params,
+            entropy_params: hk.Params,
             rng_key: PRNGKey,
             opt_state: optax.OptState,
             batch: Batch
-    ) -> Tuple[hk.Params, optax.OptState]:
+    ) -> Tuple[hk.Params, optax.OptState, dict]:
         observation = batch['observation']
 
-        def loss():
-            policy = self.actor.apply(params, observation)
-            action = policy.sample()
-            qs = self.critics.apply(self.critics.params, observation, action)
+        def loss(actor_params: hk.Params, critic_params: hk.Params,
+                 entropy_params: hk.Params, rng_key: PRNGKey):
+            policy = self.actor.apply(actor_params, observation)
+            action = policy.sample(seed=rng_key)
+            qs = self.critics.apply(critic_params, observation, action)
             debiased_q = jnp.minimum(*jax.tree_map(lambda q: q.mean(), qs))
-            entropy_bonus = self.entropy_bonus.apply(self.entropy_bonus.params,
+            entropy_bonus = self.entropy_bonus.apply(entropy_params,
                                                      policy.log_prob(action))
-            return -jnp.mean(debiased_q + entropy_bonus)
+            actor_loss = -jnp.mean(debiased_q + entropy_bonus)
+            return actor_loss, {
+                'agent/actor/loss': actor_loss}
 
-        grads = jax.grad(loss)
+        grads, report = jax.grad(loss, has_aux=True)(actor_params,
+                                                     critic_params,
+                                                     entropy_params, rng_key)
         updates, new_opt_state = self.actor.optimizer.update(grads, opt_state)
-        new_params = optax.apply_updates(params, updates)
-        report = {}
-        return new_params, new_opt_state
+        new_params = optax.apply_updates(actor_params, updates)
+        report.update({'agent/actor/grads': grads})
+        return new_params, new_opt_state, report
 
+    @jax.jit
     def _update_alpha(
             self,
-            params: hk.Params,
+            actor_params: hk.Params,
+            entropy_params: hk.Params,
             rng_key: PRNGKey,
             opt_state: optax.OptState,
             batch: Batch
-    ) -> Tuple[jnp.ndarray, optax.OptState]:
-        policy = self.actor.apply(self.actor.params, batch['observation'])
-        action = policy.sample()
+    ) -> Tuple[jnp.ndarray, optax.OptState, dict]:
+        policy = self.actor.apply(actor_params, batch['observation'])
+        action = policy.sample(seed=rng_key)
         log_pi = policy.log_prob(action)
 
-        def loss():
+        def loss(params: hk.Params):
             entropy_bonus = self.entropy_bonus.apply(params, log_pi)
-            return jnp.mean(-entropy_bonus + self._target_entropy)
+            alpha_loss = jnp.mean(-entropy_bonus + self._target_entropy)
+            return alpha_loss, {'actor/alpha/loss': alpha_loss}
 
-        grads = jax.grad(loss)
+        grads, report = jax.grad(loss, has_aux=True)(entropy_params)
         updates, new_opt_state = self.entropy_bonus.optimizer.update(
             grads, opt_state)
-        new_params = optax.apply_updates(params, updates)
-        return new_params, new_opt_state
+        new_params = optax.apply_updates(entropy_params, updates)
+        report.update({'agent/alpha/grads': grads,
+                       'agent/actor/entropy': -jnp.mean(log_pi)})
+        return new_params, new_opt_state, report
 
     @property
     def time_to_update(self):
