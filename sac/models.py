@@ -74,13 +74,9 @@ class StableTanhBijector(tfb.Tanh):
 
 
 class SampleDist(object):
-    def __init__(self, dist, seed=0, samples=100):
+    def __init__(self, dist, samples=100):
         self._dist = dist
         self._samples = samples
-        # Use a stateless seed to get the same samples everytime -
-        # this simulates the fact that the mean, entropy and mode are
-        # deterministic.
-        self._seed = (0, seed)
 
     @property
     def name(self):
@@ -89,16 +85,16 @@ class SampleDist(object):
     def __getattr__(self, name):
         return getattr(self._dist, name)
 
-    def mean(self):
-        samples = self._dist.sample(self._samples, seed=self._seed)
+    def mean(self, seed):
+        samples = self._dist.sample(self._samples, seed=seed)
         return jnp.mean(samples, 0)
 
-    def mode(self):
-        sample = self._dist.sample(self._samples, seed=self._seed)
+    def mode(self, seed):
+        sample = self._dist.sample(self._samples, seed=seed)
         logprob = self._dist.log_prob(sample)
         return jnp.take(sample, jnp.argmax(logprob))[0]
 
-    def entropy(self):
-        sample = self._dist.sample(self._samples, seed=self._seed)
+    def entropy(self, seed):
+        sample = self._dist.sample(self._samples, seed=seed)
         logprob = self.log_prob(sample)
         return -jnp.mean(logprob, 0)

@@ -11,6 +11,7 @@ import sac.utils as utils
 from sac.models import EntropyBonus
 
 PRNGKey = jnp.ndarray
+Observation = np.ndarray
 Batch = Mapping[str, np.ndarray]
 
 
@@ -44,7 +45,7 @@ class SAC:
         self._prefill_policy = lambda: np.random.uniform(action_space.low,
                                                          action_space.high)
 
-    def __call__(self, observation, training=True):
+    def __call__(self, observation: Observation, training=True):
         if self.training_step <= self.config.prefill and training:
             return self._prefill_policy()
         if self.time_to_update and training:
@@ -56,13 +57,16 @@ class SAC:
             self.target_critics.params = utils.clone_model(
                 self.critics.params, self.target_critics.params)
 
-        action = self.policy(observation, training).numpy()
+        action = self.policy(observation, self.actor.params,
+                             next(self.rng_seq), training)
         return np.clip(action, -1.0, 1.0)
 
     @jax.jit
-    def policy(self, observation, training=True):
-        policy = self.actor.apply(self.actor.params, observation)
-        action = policy.sample() if training else policy.mode()
+    def policy(self, observation: Observation, params: hk.Params,
+               rng_key: PRNGKey, training=True) -> jnp.ndarray:
+        policy = self.actor.apply(params, observation)
+        action = policy.sample(seed=rng_key) if training else policy.mode(
+            seed=rng_key)
         action = jnp.squeeze(action, 0)
         return action
 
