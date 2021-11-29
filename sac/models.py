@@ -37,13 +37,14 @@ class DoubleCritic(hk.Module):
 
     def __call__(self, observation, action):
         x = jnp.concatenate([observation, action], -1)
-        mlps = [hk.nets.MLP(self.output_sizes)] * 2
+        mlp1 = hk.nets.MLP(self.output_sizes)
+        mlp2 = hk.nets.MLP(self.output_sizes)
 
         def to_dist(q_fn):
             mu = jnp.squeeze(q_fn(x), -1)
             return tfd.Normal(loc=mu, scale=1.0)
 
-        return jax.tree_map(to_dist, mlps)
+        return jax.tree_map(to_dist, [mlp1, mlp2])
 
 
 class EntropyBonus(hk.Module):
