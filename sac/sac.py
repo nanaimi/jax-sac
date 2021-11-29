@@ -60,7 +60,8 @@ class SAC:
             self.logger.log_metrics(self.training_step)
         if self.time_to_clone_critics:
             self.target_critics.params = utils.clone_model(
-                self.critics.params, self.target_critics.params)
+                self.critics.params, self.target_critics.params,
+                self.config.tau)
 
         action = self.policy(observation, self.actor.params,
                              next(self.rng_seq), training)
@@ -121,8 +122,7 @@ class SAC:
             next_qs = self.target_critics.apply(target_critic_params,
                                                 batch['next_observation'],
                                                 next_action)
-            debiased_q = jnp.min(
-                jnp.array(list(map(lambda q: q.mean(), next_qs))), 0)
+            debiased_q = jnp.minimum(*list(map(lambda q: q.mean(), next_qs)))
             entropy_bonus = self.entropy_bonus.apply(
                 entropy_params, policy.log_prob(next_action))
             soft_q = debiased_q + entropy_bonus
@@ -161,8 +161,7 @@ class SAC:
             policy = self.actor.apply(actor_params, observation)
             action = policy.sample(seed=rng_key)
             qs = self.critics.apply(critic_params, observation, action)
-            debiased_q = jnp.min(
-                jnp.array(list(map(lambda q: q.mean(), qs))), 0)
+            debiased_q = jnp.minimum(*list(map(lambda q: q.mean(), qs)))
             entropy_bonus = self.entropy_bonus.apply(entropy_params,
                                                      policy.log_prob(action))
             actor_loss = -jnp.mean(debiased_q + entropy_bonus)
