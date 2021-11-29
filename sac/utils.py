@@ -17,7 +17,10 @@ class Learner:
             seed: PRNGKey,
             optimizer_config: dict
     ):
-        self.optimizer = optax.adam(optimizer_config['lr'])
+        self.optimizer = optax.chain(
+            optax.clip_by_global_norm(optimizer_config['clip']),
+            optax.scale_by_adam(eps=optimizer_config['eps']),
+            optax.scale(-optimizer_config['lr']))
         self.model = hk.transform(model)
         self.params = self.model.init(
             seed,
