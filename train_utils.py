@@ -3,15 +3,7 @@ import pathlib
 from collections import defaultdict
 
 import numpy as np
-import tensorflow as tf
 from tqdm import tqdm
-
-
-def fix_tuple_observation(observation):
-    if isinstance(observation, tuple):
-        return tuple(map(lambda x: x.astype(np.float32), observation))
-    else:
-        return observation
 
 
 def do_episode(agent, training, environment, config, pbar, render):
@@ -24,8 +16,8 @@ def do_episode(agent, training, environment, config, pbar, render):
         next_observation, reward, done, info = environment.step(action)
         terminal = done and not info.get('TimeLimit.truncated', False)
         if training:
-            agent.observe(dict(observation=fix_tuple_observation(observation),
-                               next_observation=fix_tuple_observation(next_observation),
+            agent.observe(dict(observation=observation,
+                               next_observation=next_observation,
                                action=action.astype(np.float32),
                                reward=np.array(reward, np.float32),
                                terminal=np.array(terminal, np.float32),
@@ -38,14 +30,16 @@ def do_episode(agent, training, environment, config, pbar, render):
         episode_summary['info'].append(info)
         observation = next_observation
         if render:
-            episode_summary['image'].append(environment.render(mode='rgb_array'))
+            episode_summary['image'].append(
+                environment.render(mode='rgb_array'))
         pbar.update(config.action_repeat)
         steps += config.action_repeat
     episode_summary['steps'] = [steps]
     return steps, episode_summary
 
 
-def interact(agent, environment, steps, config, training=True, on_episode_end=None):
+def interact(agent, environment, steps, config, training=True,
+             on_episode_end=None):
     pbar = tqdm(total=steps)
     steps_count = 0
     episodes = []
@@ -53,7 +47,8 @@ def interact(agent, environment, steps, config, training=True, on_episode_end=No
         episode_steps, episode_summary = do_episode(agent, training,
                                                     environment, config,
                                                     pbar,
-                                                    len(episodes) < config.render_episodes and
+                                                    len(episodes) <
+                                                    config.render_episodes and
                                                     not training)
         steps_count += episode_steps
         episodes.append(episode_summary)
@@ -74,11 +69,14 @@ def make_summary(summaries, prefix):
 
 def evaluate(agent, train_env, logger, config, steps):
     evaluation_steps, evaluation_episodes_summaries = interact(
-        agent, train_env, config.evaluation_steps_per_epoch, config, training=False)
+        agent, train_env, config.evaluation_steps_per_epoch, config,
+        training=False)
     if config.render_episodes:
         videos = list(map(lambda episode: episode.get('image'),
-                          evaluation_episodes_summaries[:config.render_episodes]))
-        logger.log_video(np.array(videos, copy=False).transpose([0, 1, 4, 2, 3]), steps)
+                          evaluation_episodes_summaries[
+                          :config.render_episodes]))
+        logger.log_video(
+            np.array(videos, copy=False).transpose([0, 1, 4, 2, 3]), steps)
     return make_summary(evaluation_episodes_summaries, 'evaluation')
 
 
@@ -91,20 +89,22 @@ def on_episode_end(episode_summary, logger, global_step, steps_count):
 
 
 def train(config, agent, environment, logger):
-    tf.config.experimental_run_functions_eagerly(not config.jit)
-    tf.random.set_seed(config.seed)
+    from jax.config import config as jax_config
+    jax_config.update('jax_disable_jit', not config.jit)
     np.random.seed(config.seed)
-    checkpoint = tf.train.Checkpoint(agent=agent, actor=agent.actor,
-                                     critics=agent.critics)
     steps = 0
     if pathlib.Path(config.log_dir, 'agent_data').exists():
-        checkpoint.restore(os.path.join(config.log_dir, 'agent_data', 'checkpoint'))
+        checkpoint.restore(
+            os.path.join(config.log_dir, 'agent_data', 'checkpoint'))
         steps = agent.training_step
-        print("Loaded {} steps. Continuing training from {}".format(steps, config.log_dir))
+        print("Loaded {} steps. Continuing training from {}".format(
+            steps,
+            config.log_dir))
     while steps < config.steps:
         print("Performing a training epoch.")
         training_steps, training_episodes_summaries = interact(
-            agent, environment, config.training_steps_per_epoch, config, training=True,
+            agent, environment, config.training_steps_per_epoch, config,
+            training=True,
             on_episode_end=lambda episode_summary, steps_count: on_episode_end(
                 episode_summary, logger=logger, global_step=steps,
                 steps_count=steps_count))
@@ -112,10 +112,12 @@ def train(config, agent, environment, logger):
         training_summary = make_summary(training_episodes_summaries, 'training')
         if config.evaluation_steps_per_epoch:
             print("Evaluating.")
-            evaluation_summaries = evaluate(agent, environment, logger, config, steps)
+            evaluation_summaries = evaluate(agent, environment, logger, config,
+                                            steps)
             training_summary.update(evaluation_summaries)
         logger.log_evaluation_summary(training_summary, steps)
-        checkpoint.write(os.path.join(config.log_dir, 'agent_data', 'checkpoint'))
+        checkpoint.write(
+            os.path.join(config.log_dir, 'agent_data', 'checkpoint'))
     environment.close()
     return agent
 
@@ -141,7 +143,8 @@ def load_config():
                 return tuple(x)
             return x
 
-        return lambda x: parse_string(x) if isinstance(x, str) else parse_object(x)
+        return lambda x: parse_string(x) if isinstance(x,
+                                                       str) else parse_object(x)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--configs', nargs='+', required=True)
