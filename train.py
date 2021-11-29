@@ -1,6 +1,5 @@
-from copy import deepcopy
-
 import gym
+import haiku.nets as nets
 import numpy as np
 
 import sac.env_wrappers as env_wrappers
@@ -13,22 +12,21 @@ from sac.sac import SAC
 
 def make_agent(config, environment, logger):
     actor = models.Actor(
-        *make_net_optimizer_from_config(config.actor, config.actor_opt),
-        environment.action_space.shape[0],
-        config.actor['min_std'],
-        config.actor_opt['clip'],
-        encoder)
-    critics = [models.DoubleCritic(
-        *make_net_optimizer_from_config(config.critic, config.critic_opt),
-        config.discount,
-        config.tau,
-        config.critic_opt['clip'],
-        deepcopy(encoder))
-        for _ in range(config.critics)]
+        nets.MLP((config.actor['units']) * config.actor['layers'] + (
+            environment.action_space.shape[0],)),
+        config.actor['min_std']
+    )
+    critics = models.DoubleCritic(
+        *[nets.MLP(
+            (config.critic['units']) * config.critic['layers'] + (1,))
+            for _ in range(config.critics)]
+    )
     experience = ReplayBuffer(config.replay['capacity'], config.seed,
                               config.replay['batch'])
-    agent = SAC(actor, critics, experience, logger, environment.action_space,
-                config)
+    agent = SAC(environment.observation_space,
+                environment.action_space,
+                actor, critics, experience,
+                logger, config)
     return agent
 
 
