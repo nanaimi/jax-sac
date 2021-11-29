@@ -204,6 +204,7 @@ class SAC:
         return new_params, new_opt_state, report
 
     def write(self, path):
+        os.makedirs(path, exist_ok=True)
         with open(os.path.join(path, 'checkpoint.pickle'), 'wb') as f:
             pickle.dump({'actor': self.actor,
                          'critics': self.critics,

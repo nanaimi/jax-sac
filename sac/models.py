@@ -94,7 +94,7 @@ class SampleDist(object):
     def mode(self, seed):
         sample = self._dist.sample(self._samples, seed=seed)
         logprob = self._dist.log_prob(sample)
-        return jnp.take(sample, jnp.argmax(logprob))[0]
+        return sample[jnp.argmax(logprob)]
 
     def entropy(self, seed):
         sample = self._dist.sample(self._samples, seed=seed)
