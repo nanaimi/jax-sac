@@ -89,8 +89,9 @@ def on_episode_end(episode_summary, logger, global_step, steps_count):
 
 
 def train(config, agent, environment, logger):
-    from jax.config import config as jax_config
-    jax_config.update('jax_disable_jit', not config.jit)
+    if not config.jit:
+        from jax.config import config as jax_config
+        jax_config.update('jax_disable_jit', True)
     np.random.seed(config.seed)
     steps = 0
     if pathlib.Path(config.log_dir, 'agent_data').exists():

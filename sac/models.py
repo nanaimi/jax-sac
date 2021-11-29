@@ -9,13 +9,14 @@ tfb = tfp.bijectors
 
 
 class Actor(hk.Module):
-    def __init__(self, net, min_stddev):
+    def __init__(self, output_sizes, min_stddev):
         super().__init__()
-        self.net = net
+        self.output_sizes = output_sizes
         self._min_stddev = min_stddev
 
     def __call__(self, observation):
-        mu, stddev = jnp.split(self.net(observation), 2, -1)
+        mlp = hk.nets.MLP(self.output_sizes)
+        mu, stddev = jnp.split(mlp(observation), 2, -1)
         stddev = jnn.softplus(stddev) + self._min_stddev
         multivariate_normal_diag = tfd.MultivariateNormalDiag(
             loc=mu,
@@ -30,18 +31,19 @@ class Actor(hk.Module):
 
 
 class DoubleCritic(hk.Module):
-    def __init__(self, net_1, net_2):
+    def __init__(self, output_sizes):
         super().__init__()
-        self.nets = [net_1, net_2]
+        self.output_sizes = output_sizes
 
     def __call__(self, observation, action):
         x = jnp.concatenate([observation, action], -1)
+        mlps = [hk.nets.MLP(self.output_sizes)] * 2
 
         def to_dist(q_fn):
             mu = jnp.squeeze(q_fn(x), -1)
             return tfd.Normal(loc=mu, scale=1.0)
 
-        return jax.tree_map(to_dist, self.nets)
+        return jax.tree_map(to_dist, mlps)
 
 
 class EntropyBonus(hk.Module):

@@ -1,9 +1,8 @@
-from typing import Tuple, Union, List
+from typing import Callable
 
 import haiku as hk
 import jax
 import jax.numpy as jnp
-import numpy as np
 import optax
 
 PRNGKey = jnp.ndarray
@@ -12,20 +11,20 @@ PRNGKey = jnp.ndarray
 class Learner:
     def __init__(
             self,
-            model: hk.Module,
-            input_shape: Union[Tuple[int, ...], List[int]],
+            model_fn: Callable,
             seed: PRNGKey,
-            optimizer_config: dict
+            optimizer_config: dict,
+            deterministic: bool,
+            *input_example
     ):
         self.optimizer = optax.chain(
             optax.clip_by_global_norm(optimizer_config['clip']),
             optax.scale_by_adam(eps=optimizer_config['eps']),
             optax.scale(-optimizer_config['lr']))
-        self.model = hk.transform(model)
-        self.params = self.model.init(
-            seed,
-            np.zeros((1, *input_shape), jnp.float32)
-        )
+        self.model = hk.transform(model_fn)
+        if deterministic:
+            self.model = hk.without_apply_rng(self.model)
+        self.params = self.model.init(seed, *input_example)
         self.opt_state = self.optimizer.init(self.params)
 
     @property

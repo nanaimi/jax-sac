@@ -1,5 +1,4 @@
 import gym
-import haiku.nets as nets
 import numpy as np
 
 import sac.env_wrappers as env_wrappers
@@ -11,16 +10,14 @@ from sac.sac import SAC
 
 
 def make_agent(config, environment, logger):
-    actor = models.Actor(
-        nets.MLP((config.actor['units']) * config.actor['layers'] + (
-            environment.action_space.shape[0],)),
+    actor = lambda observation: models.Actor(
+        (config.actor['units'],) * config.actor['layers'] + (
+            environment.action_space.shape[0] * 2,),
         config.actor['min_std']
-    )
-    critics = models.DoubleCritic(
-        *[nets.MLP(
-            (config.critic['units']) * config.critic['layers'] + (1,))
-            for _ in range(config.critics)]
-    )
+    )(observation)
+    critics = lambda observation, action: models.DoubleCritic(
+        (config.critic['units'],) * config.critic['layers'] + (1,)
+    )(observation, action)
     experience = ReplayBuffer(config.replay['capacity'], config.seed,
                               config.replay['batch'])
     agent = SAC(environment.observation_space,
