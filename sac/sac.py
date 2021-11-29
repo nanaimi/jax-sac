@@ -1,3 +1,5 @@
+import os
+import pickle
 from copy import deepcopy
 from typing import Mapping, Tuple
 
@@ -196,6 +198,26 @@ class SAC:
         report.update({'agent/alpha/grads': grads,
                        'agent/actor/entropy': -jnp.mean(log_pi)})
         return new_params, new_opt_state, report
+
+    def write(self, path):
+        with open(os.path.join(path, 'checkpoint.pickle'), 'wb') as f:
+            pickle.dump({'actor': self.actor,
+                         'critics': self.critics,
+                         'entropy': self.entropy_bonus,
+                         'experience': self.experience,
+                         'training_steps': self.training_step}, f)
+
+    def load(self, path):
+        with open(os.path.join(path, 'checkpoint.pickle'), 'rb') as f:
+            data = pickle.load(f)
+        for key, obj in zip(data.keys(), [
+            self.actor,
+            self.critics,
+            self.entropy_bonus,
+            self.experience,
+            self.training_step
+        ]):
+            obj = data[key]
 
     @property
     def time_to_update(self):

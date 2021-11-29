@@ -94,8 +94,7 @@ def train(config, agent, environment, logger):
     np.random.seed(config.seed)
     steps = 0
     if pathlib.Path(config.log_dir, 'agent_data').exists():
-        checkpoint.restore(
-            os.path.join(config.log_dir, 'agent_data', 'checkpoint'))
+        agent.load(os.path.join(config.log_dir, 'agent_data'))
         steps = agent.training_step
         print("Loaded {} steps. Continuing training from {}".format(
             steps,
@@ -116,8 +115,7 @@ def train(config, agent, environment, logger):
                                             steps)
             training_summary.update(evaluation_summaries)
         logger.log_evaluation_summary(training_summary, steps)
-        checkpoint.write(
-            os.path.join(config.log_dir, 'agent_data', 'checkpoint'))
+        agent.write(os.path.join(config.log_dir, 'agent_data'))
     environment.close()
     return agent
 
