@@ -29,7 +29,6 @@ class SAC:
             logger,
             config
     ):
-        super(SAC, self).__init__()
         self.rng_seq = hk.PRNGSequence(config.seed)
         self.actor = utils.Learner(actor, next(self.rng_seq), config.actor_opt,
                                    True, observation_space.sample())
