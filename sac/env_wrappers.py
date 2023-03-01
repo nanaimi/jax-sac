@@ -1,4 +1,4 @@
-from gym import Wrapper, RewardWrapper
+from gym import Wrapper
 
 
 class ActionRepeat(Wrapper):
@@ -8,11 +8,12 @@ class ActionRepeat(Wrapper):
         self.repeat = repeat
 
     def step(self, action):
-        done = False
+        termination = False
+        truncation = False
         total_reward = 0.0
         current_step = 0
-        while current_step < self.repeat and not done:
-            obs, reward, done, info = self.env.step(action)
+        while current_step < self.repeat and not (termination or truncation):
+            obs, reward, termination, truncation, info = self.env.step(action)
             total_reward += reward
             current_step += 1
-        return obs, total_reward, done, info  # noqa
+        return obs, total_reward, termination, truncation, info  # noqa

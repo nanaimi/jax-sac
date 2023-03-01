@@ -16,6 +16,7 @@ defaults:
   jit: True
   clip_rewards: none
   render_episodes: 1
+  render_mode: 'rgb_array'
 
   # Actor Critic
   actor: {layers: 2, units: 256, act: relu, min_std: 1e-5}

@@ -10,25 +10,32 @@ from sac.sac import SAC
 
 
 def make_agent(config, environment, logger):
+
     actor = lambda observation: models.Actor(
         (config.actor['units'],) * config.actor['layers'] + (
             environment.action_space.shape[0] * 2,),
         config.actor['min_std']
     )(observation)
     critics = lambda observation, action: models.DoubleCritic(
-        (config.critic['units'],) * config.critic['layers'] + (1,)
+        (config.critic["units"],) * config.critic["layers"] + (1,)
     )(observation, action)
-    experience = ReplayBuffer(config.replay['capacity'], config.seed,
-                              config.replay['batch'])
-    agent = SAC(environment.observation_space,
-                environment.action_space,
-                actor, critics, experience,
-                logger, config)
+    experience = ReplayBuffer(
+        config.replay["capacity"], config.seed, config.replay["batch"]
+    )
+    agent = SAC(
+        environment.observation_space,
+        environment.action_space,
+        actor,
+        critics,
+        experience,
+        logger,
+        config,
+    )
     return agent
 
 
 def make_environment(config):
-    env = gym.make(config.task)
+    env = gym.make(config.task, render_mode=config.render_mode)
     if not isinstance(env, gym.wrappers.TimeLimit):
         env = gym.wrappers.TimeLimit(env, max_episode_steps=config.time_limit)
     else:
@@ -37,14 +44,13 @@ def make_environment(config):
     env = env_wrappers.ActionRepeat(env, config.action_repeat)
     env = gym.wrappers.RescaleAction(env, -1.0, 1.0)
     env = gym.wrappers.TransformReward(
-        env,
-        dict(tanh=np.tanh, none=lambda x: x)[config.clip_rewards]
+        env, dict(tanh=np.tanh, none=lambda x: x)[config.clip_rewards]
     )
-    env.seed(config.seed)
+    # env.seed(config.seed)
     return env
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     config = train_utils.load_config()
     environment = make_environment(config)
     logger = TrainingLogger(config.log_dir)

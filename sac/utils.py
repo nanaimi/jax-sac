@@ -39,5 +39,5 @@ def td_error(next_value, reward, terminal, discount):
 
 @jax.jit
 def clone_model(a_params, b_params, tau=1.0):
-    return jax.tree_multimap(lambda p_a, p_b: p_a * tau + p_b * (1.0 - tau),
+    return jax.tree_map(lambda p_a, p_b: p_a * tau + p_b * (1.0 - tau),
                              a_params, b_params)
